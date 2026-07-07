@@ -797,6 +797,27 @@ pub fn get_default_settings() -> AppSettings {
             current_binding: default_post_process_shortcut.to_string(),
         },
     );
+    #[cfg(target_os = "windows")]
+    let default_voice_command_shortcut = "ctrl+alt+space";
+    #[cfg(target_os = "macos")]
+    let default_voice_command_shortcut = "ctrl+option+space";
+    #[cfg(target_os = "linux")]
+    let default_voice_command_shortcut = "ctrl+alt+space";
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    let default_voice_command_shortcut = "ctrl+alt+space";
+
+    bindings.insert(
+        "voice_command".to_string(),
+        ShortcutBinding {
+            id: "voice_command".to_string(),
+            name: "Voice Command".to_string(),
+            description: "Rewrites the selected text according to your spoken instruction."
+                .to_string(),
+            default_binding: default_voice_command_shortcut.to_string(),
+            current_binding: default_voice_command_shortcut.to_string(),
+        },
+    );
+
     bindings.insert(
         "cancel".to_string(),
         ShortcutBinding {

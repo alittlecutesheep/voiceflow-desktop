@@ -178,6 +178,10 @@
           "transcribe_with_post_process": {
             "name": "Post-Processing Hotkey",
             "description": "Optional: A dedicated hotkey that always applies AI post-processing to your transcription."
+          },
+          "voice_command": {
+            "name": "Voice Command Hotkey",
+            "description": "Select text anywhere, hold or toggle this hotkey, and speak an instruction (e.g. \"make this a bullet list\", \"translate to English\") — the selection is rewritten in place via the Voice Flow backend."
           }
         },
         "errors": {

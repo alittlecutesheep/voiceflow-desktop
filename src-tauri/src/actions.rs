@@ -49,6 +49,65 @@ pub trait ShortcutAction: Send + Sync {
 // Transcribe Action
 struct TranscribeAction {
     post_process: bool,
+    /// Voice Command 模式（Phase 5）：錄音前捕捉選取文字，
+    /// 逐字稿當作改寫指令送後端 /polish，結果貼回取代選取。
+    command_mode: bool,
+}
+
+/// 模擬 Ctrl+C 捕捉當前選取文字。會暫時動到剪貼簿；若沒有選取
+/// （剪貼簿讀回空值）則還原原本內容並回傳 None。
+/// 必須在使用者已放開熱鍵後呼叫（STT 完成後），否則實體按著的
+/// 修飾鍵會污染送出的 Ctrl+C。
+fn capture_selected_text(app: &AppHandle) -> Option<String> {
+    use enigo::{Direction, Key, Keyboard};
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let clipboard = app.clipboard();
+    let original = clipboard.read_text().unwrap_or_default();
+    if clipboard.write_text(String::new()).is_err() {
+        return None;
+    }
+
+    {
+        let enigo_state = app.try_state::<crate::input::EnigoState>()?;
+        let mut enigo = enigo_state.0.lock().ok()?;
+        // 防禦性釋放修飾鍵（釋放未按下的鍵無害）
+        let _ = enigo.key(Key::Alt, Direction::Release);
+        let _ = enigo.key(Key::Shift, Direction::Release);
+        if let Err(e) = crate::input::send_copy_ctrl_c(&mut enigo) {
+            error!("Voice command: failed to send copy keystroke: {}", e);
+            let _ = clipboard.write_text(original);
+            return None;
+        }
+    }
+
+    // 等目標 app 完成剪貼簿寫入
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
+    let selection = clipboard.read_text().unwrap_or_default();
+    if selection.trim().is_empty() {
+        let _ = clipboard.write_text(original);
+        return None;
+    }
+    Some(selection)
+}
+
+/// 在主執行緒執行選取捕捉（enigo/剪貼簿與貼上路徑相同的執行緒紀律）。
+async fn capture_selection_on_main(app: &AppHandle) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let app_clone = app.clone();
+    if app
+        .run_on_main_thread(move || {
+            let _ = tx.send(capture_selected_text(&app_clone));
+        })
+        .is_err()
+    {
+        return None;
+    }
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .ok()
+        .flatten()
 }
 
 /// Field name for structured output JSON schema
@@ -77,6 +136,26 @@ fn is_blank_transcription(transcription: &str) -> bool {
 /// Voice Flow: 把逐字稿送 VPS 後端 `/polish` 潤飾（潤飾 prompt 與詞庫在後端）。
 /// 任何錯誤都 fail-open 回 `None`，讓呼叫端注入原始逐字稿，聽寫不因後端故障中斷。
 async fn voiceflow_polish(settings: &AppSettings, transcription: &str) -> Option<String> {
+    voiceflow_post_polish(settings, serde_json::json!({ "text": transcription })).await
+}
+
+/// Voice Command（Phase 5）：選取文字 + 口述指令 → 後端改寫。
+async fn voiceflow_rewrite(
+    settings: &AppSettings,
+    selected_text: &str,
+    instruction: &str,
+) -> Option<String> {
+    voiceflow_post_polish(
+        settings,
+        serde_json::json!({ "text": selected_text, "command": instruction }),
+    )
+    .await
+}
+
+async fn voiceflow_post_polish(
+    settings: &AppSettings,
+    body: serde_json::Value,
+) -> Option<String> {
     let endpoint = settings.voiceflow_endpoint.trim().trim_end_matches('/');
     let url = format!("{}/polish", endpoint);
 
@@ -97,7 +176,7 @@ async fn voiceflow_polish(settings: &AppSettings, transcription: &str) -> Option
             "Authorization",
             format!("Bearer {}", settings.voiceflow_token.trim()),
         )
-        .json(&serde_json::json!({ "text": transcription }))
+        .json(&body)
         .send()
         .await
     {
@@ -680,6 +759,7 @@ impl ShortcutAction for TranscribeAction {
 
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
         let post_process = self.post_process;
+        let command_mode = self.command_mode;
         let cancel_generation = rm.cancel_generation();
 
         tauri::async_runtime::spawn(async move {
@@ -785,9 +865,38 @@ impl ShortcutAction for TranscribeAction {
                                     show_processing_overlay(&ah);
                                 }
                             }
-                            let processed =
+                            let processed = if command_mode {
+                                // Voice Command：逐字稿是指令，捕捉當前選取文字後送改寫。
+                                // 捕捉須等熱鍵放開（此時 STT 已完成，必然已放開）。
+                                // 任一條件不滿足或後端失敗 → final_text 留空、不貼上，
+                                // 避免用指令原文蓋掉使用者的選取。
+                                let settings = get_settings(&ah);
+                                let selection = capture_selection_on_main(&ah).await;
+                                let rewritten = match &selection {
+                                    Some(sel)
+                                        if !settings.voiceflow_endpoint.trim().is_empty()
+                                            && !settings.privacy_mode =>
+                                    {
+                                        voiceflow_rewrite(&settings, sel, &transcription).await
+                                    }
+                                    Some(_) => {
+                                        warn!("Voice command needs the Voice Flow endpoint set and privacy mode off");
+                                        None
+                                    }
+                                    None => {
+                                        warn!("Voice command: no text selected");
+                                        None
+                                    }
+                                };
+                                ProcessedTranscription {
+                                    final_text: rewritten.clone().unwrap_or_default(),
+                                    post_processed_text: rewritten,
+                                    post_process_prompt: None,
+                                }
+                            } else {
                                 process_transcription_output(&ah, &transcription, post_process)
-                                    .await;
+                                    .await
+                            };
 
                             if rm.was_cancelled_since(cancel_generation) {
                                 debug!("Transcription operation cancelled before paste");
@@ -935,11 +1044,22 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
         "transcribe".to_string(),
         Arc::new(TranscribeAction {
             post_process: false,
+            command_mode: false,
         }) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "transcribe_with_post_process".to_string(),
-        Arc::new(TranscribeAction { post_process: true }) as Arc<dyn ShortcutAction>,
+        Arc::new(TranscribeAction {
+            post_process: true,
+            command_mode: false,
+        }) as Arc<dyn ShortcutAction>,
+    );
+    map.insert(
+        "voice_command".to_string(),
+        Arc::new(TranscribeAction {
+            post_process: true,
+            command_mode: true,
+        }) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "cancel".to_string(),

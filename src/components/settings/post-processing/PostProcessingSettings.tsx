@@ -440,6 +440,11 @@ export const PostProcessingSettings: React.FC = () => {
 
       <SettingsGroup title={t("settings.voiceflow.title")}>
         <VoiceFlowSettings />
+        <ShortcutInput
+          shortcutId="voice_command"
+          descriptionMode="tooltip"
+          grouped={true}
+        />
       </SettingsGroup>
 
       <SettingsGroup title={t("settings.postProcessing.api.title")}>
