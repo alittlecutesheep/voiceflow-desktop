@@ -402,6 +402,16 @@ pub struct AppSettings {
     pub post_process_prompts: Vec<LLMPrompt>,
     #[serde(default)]
     pub post_process_selected_prompt_id: Option<String>,
+    /// Voice Flow: VPS 聽寫後端 base URL（如 http://100.86.122.7:8010）。
+    /// 設定後 post-process 熱鍵改走後端 /polish（潤飾 prompt 與詞庫在後端共用）。
+    #[serde(default)]
+    pub voiceflow_endpoint: String,
+    /// Voice Flow: /polish 的 Bearer token（DICTATION_TOKEN）。
+    #[serde(default)]
+    pub voiceflow_token: String,
+    /// Voice Flow: privacy mode 開啟時跳過雲端潤飾，直接注入原始逐字稿。
+    #[serde(default)]
+    pub privacy_mode: bool,
     #[serde(default)]
     pub mute_while_recording: bool,
     #[serde(default)]
@@ -837,6 +847,9 @@ pub fn get_default_settings() -> AppSettings {
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
+        voiceflow_endpoint: String::new(),
+        voiceflow_token: String::new(),
+        privacy_mode: false,
         mute_while_recording: false,
         append_trailing_space: false,
         app_language: default_app_language(),

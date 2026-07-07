@@ -369,6 +369,23 @@
         "description": "Filter silence from recordings. Streaming-capable models use a longer VAD tail; disabling VAD records raw audio."
       }
     },
+    "voiceflow": {
+      "title": "Voice Flow (VPS Polish)",
+      "endpoint": {
+        "title": "Backend URL",
+        "description": "Base URL of your dictation backend (e.g. http://100.86.122.7:8010). When set, the post-process hotkey sends the transcript to the backend /polish endpoint instead of the LLM configured below.",
+        "placeholder": "http://100.x.y.z:8010"
+      },
+      "token": {
+        "title": "Access Token",
+        "description": "Bearer token for the backend (DICTATION_TOKEN). Stored locally in your settings file.",
+        "placeholder": "DICTATION_TOKEN"
+      },
+      "privacyMode": {
+        "label": "Privacy Mode",
+        "description": "Skip cloud polishing entirely — the raw transcript is pasted without leaving this machine."
+      }
+    },
     "postProcessing": {
       "hotkey": {
         "title": "Hotkey"

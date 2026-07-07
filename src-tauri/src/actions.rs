@@ -74,10 +74,74 @@ fn is_blank_transcription(transcription: &str) -> bool {
     transcription.trim().is_empty()
 }
 
+/// Voice Flow: 把逐字稿送 VPS 後端 `/polish` 潤飾（潤飾 prompt 與詞庫在後端）。
+/// 任何錯誤都 fail-open 回 `None`，讓呼叫端注入原始逐字稿，聽寫不因後端故障中斷。
+async fn voiceflow_polish(settings: &AppSettings, transcription: &str) -> Option<String> {
+    let endpoint = settings.voiceflow_endpoint.trim().trim_end_matches('/');
+    let url = format!("{}/polish", endpoint);
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Voice Flow: failed to build HTTP client: {}", e);
+            return None;
+        }
+    };
+
+    let response = match client
+        .post(&url)
+        .header(
+            "Authorization",
+            format!("Bearer {}", settings.voiceflow_token.trim()),
+        )
+        .json(&serde_json::json!({ "text": transcription }))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Voice Flow: /polish request failed: {}", e);
+            return None;
+        }
+    };
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        error!("Voice Flow: /polish returned {}: {}", status, body);
+        return None;
+    }
+
+    match response.json::<serde_json::Value>().await {
+        Ok(v) => v
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        Err(e) => {
+            error!("Voice Flow: failed to parse /polish response: {}", e);
+            None
+        }
+    }
+}
+
 async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
     if is_blank_transcription(transcription) {
         debug!("Post-processing skipped because the transcription is empty");
         return None;
+    }
+
+    // Voice Flow: 設定了 VPS endpoint 就改走後端 /polish，不用本地 LLM 設定。
+    // privacy_mode 開啟時完全不出網，直接用原始逐字稿。
+    if !settings.voiceflow_endpoint.trim().is_empty() {
+        if settings.privacy_mode {
+            debug!("Voice Flow: privacy mode on — skipping cloud polish");
+            return None;
+        }
+        return voiceflow_polish(settings, transcription).await;
     }
 
     let provider = match settings.active_post_process_provider().cloned() {

@@ -369,6 +369,23 @@
         "description": "Filter silence from recordings. Streaming-capable models use a longer VAD tail; disabling VAD records raw audio."
       }
     },
+    "voiceflow": {
+      "title": "Voice Flow（VPS 潤飾）",
+      "endpoint": {
+        "title": "後端網址",
+        "description": "聽寫後端的 base URL（例如 http://100.86.122.7:8010）。設定後，後製快捷鍵會把逐字稿送到後端 /polish 潤飾，不再使用下方的 LLM 設定。",
+        "placeholder": "http://100.x.y.z:8010"
+      },
+      "token": {
+        "title": "存取權杖",
+        "description": "後端的 Bearer token（DICTATION_TOKEN），僅儲存在本機設定檔。",
+        "placeholder": "DICTATION_TOKEN"
+      },
+      "privacyMode": {
+        "label": "隱私模式",
+        "description": "完全跳過雲端潤飾——直接貼上原始逐字稿，內容不離開這台電腦。"
+      }
+    },
     "postProcessing": {
       "hotkey": {
         "title": "快捷鍵"
